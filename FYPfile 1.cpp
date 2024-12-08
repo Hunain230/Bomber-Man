@@ -3,104 +3,143 @@
 #include <conio.h>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 using namespace std;
 
-const int ROWS = 10;
+const int ROWS = 14;
 const int COLS = 30;
-const int MAX_DESTRUCT_OBSTACLES = 20;
-const int BOMB_TIMER = 8; // Time for bomb to explode in seconds
-const int EXPLOSION_RANGE = 3; // Bomb explosion range
+const int MAX_DESTRUCT_OBSTACLES = 50;
+const int BOMB_TIMER = 14;
+const int EXPLOSION_RANGE = 2;
+const string SCORES_FILE = "high_scores.txt";
 
-void hideCursor();
-void displayGrid(int Row, int Col, int enemyRow, int enemyCol);
-bool isObstacle(int row, int col);
-void spawnEnemy(int& enemyRow, int& enemyCol);
-void moveEnemy(int& enemyRow, int& enemyCol, int playerRow, int playerCol);
-bool checkCollision(int playerRow, int playerCol, int enemyRow, int enemyCol);
-void generateDestructibleObstacles();
-void plantBomb(int playerRow, int playerCol);
-void explodeBomb(int bombRow, int bombCol, int& enemyRow, int& enemyCol);
+const int MAX_ENEMIES_STAGE1 = 2;
+const int MAX_ENEMIES_STAGE2 = 5;  // Max enemies for stage 2 can be 5
+int currentMaxEnemies = MAX_ENEMIES_STAGE1;
+
+int enemyRows[5] = { -1, -1, -1, -1, -1 };
+int enemyCols[5] = { -1, -1, -1, -1, -1 };
+bool enemyAlive[5] = { true, true, true, true, true };
 
 bool destructibleObstacles[ROWS][COLS] = { false };
 bool bombPlanted = false;
-int bombRow = -1, bombCol = -1; // Position of the planted bomb
+int bombRow = -1, bombCol = -1;
 int bombTimer = 0;
-bool enemyAlive = true; // Flag to check if the enemy is alive
+int playerScore = 0;
+
+void hideCursor();
+void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]);
+bool isObstacle(int row, int col);
+void spawnEnemies();
+void moveEnemies(int playerRow, int playerCol);
+bool checkCollision(int playerRow, int playerCol);
+void generateDestructibleObstacles();
+void plantBomb(int playerRow, int playerCol);
+void explodeBomb(int bombRow, int bombCol, int playerRow, int playerCol);
+void readHighScores(int scores[], int& count);
+void saveHighScore(int score);
+void displayHighScores();
+void transitionToStage(int stage);
 
 int main() {
     char ch;
 
     cout << "Do you want to start the game?" << endl;
-    cout << "(y / n) : ";
+    cout << "(y / n): ";
     cin >> ch;
 
     if (ch == 'y' || ch == 'Y') {
         int Row = 1, Col = 1;
-        int enemyRow = 5, enemyCol = 5;
 
-        spawnEnemy(enemyRow, enemyCol);
+        transitionToStage(1);
+        spawnEnemies();
         generateDestructibleObstacles();
         hideCursor();
 
         srand(time(0));
 
         while (true) {
-            cout << "\033[H"; // Clear the screen and reset cursor
-            displayGrid(Row, Col, enemyRow, enemyCol);
+            cout << "\033[H";  // Refresh the grid
+            displayGrid(Row, Col, enemyRows, enemyCols);
 
+            // Player movement and bomb planting
             if (_kbhit()) {
                 char key = _getch();
-                int newRow = Row;
-                int newCol = Col;
+                int newRow = Row, newCol = Col;
 
-                if (key == -32) {  // Arrow key detection
-                    key = _getch();  // Capture the second byte of the arrow key sequence
+                if (key == -32) {
+                    key = _getch();
                     switch (key) {
-                    case 72:  // Up arrow
-                        newRow--;
-                        break;
-                    case 80:  // Down arrow
-                        newRow++;
-                        break;
-                    case 75:  // Left arrow
-                        newCol--;
-                        break;
-                    case 77:  // Right arrow
-                        newCol++;
-                        break;
+                    case 72: newRow--; break;  // Up
+                    case 80: newRow++; break;  // Down
+                    case 75: newCol--; break;  // Left
+                    case 77: newCol++; break;  // Right
                     }
                 }
 
-                // Prevent the player from moving outside the grid or into fixed obstacles or destructible obstacles
-                if (newRow >= 1 && newRow < ROWS - 1 && newCol >= 1 && newCol < COLS - 1 && !isObstacle(newRow, newCol) && !destructibleObstacles[newRow][newCol]) {
+                if (newRow >= 1 && newRow < ROWS - 1 && newCol >= 1 && newCol < COLS - 1 &&
+                    !isObstacle(newRow, newCol) && !destructibleObstacles[newRow][newCol]) {
                     Row = newRow;
                     Col = newCol;
+                    playerScore++;
                 }
 
-                // Plant the bomb if 'B' is pressed
-                if (key == ' ' && !bombPlanted) {  // Spacebar check
-                    plantBomb(Row, Col); // Plant the bomb
+                if (key == ' ' && !bombPlanted) {
+                    plantBomb(Row, Col);
                 }
             }
 
-            if (enemyAlive) {
-                moveEnemy(enemyRow, enemyCol, Row, Col);
-                if (checkCollision(Row, Col, enemyRow, enemyCol)) {
-                    cout << "YOU LOST LOOSER HEHE" << endl;
+            // Move enemies
+            moveEnemies(Row, Col);
+
+            // Check for collision with enemies
+            if (checkCollision(Row, Col)) {
+                cout << "YOU LOST!" << endl;
+                saveHighScore(playerScore);
+                displayHighScores();
+                Sleep(3000);
+                break;
+            }
+
+            // Bomb explosion logic
+            if (bombPlanted) {
+                bombTimer++;
+                if (bombTimer >= BOMB_TIMER) {
+                    explodeBomb(bombRow, bombCol, Row, Col);
+                    bombPlanted = false;
+                    bombTimer = 0;
+                }
+            }
+
+            // Check if all enemies are defeated to move to the next stage
+            bool allEnemiesDefeated = true;
+            for (int k = 0; k < currentMaxEnemies; k++) {
+                if (enemyAlive[k]) {
+                    allEnemiesDefeated = false;
                     break;
                 }
             }
 
-            if (bombPlanted) {
-                bombTimer++;
-                if (bombTimer >= BOMB_TIMER) {
-                    explodeBomb(bombRow, bombCol, enemyRow, enemyCol);
-                    bombPlanted = false; // Bomb exploded
-                    bombTimer = 0; // Reset timer
+            if (allEnemiesDefeated) {
+                if (currentMaxEnemies == MAX_ENEMIES_STAGE1) {
+                    cout << "Stage 1 Complete! Moving to Stage 2!" << endl;
+                    transitionToStage(2);
+                    Row = 1; Col = 1;
+                    spawnEnemies();
+                    generateDestructibleObstacles();
+                }
+                else {
+                    cout << "Congratulations! You completed the game!" << endl;
+                    saveHighScore(playerScore);
+                    displayHighScores();
+                    Sleep(3000);
+                    break;
                 }
             }
 
-            Sleep(100);
+            Sleep(100);  // Game speed control
         }
     }
 
@@ -115,117 +154,86 @@ void hideCursor() {
     SetConsoleCursorInfo(consoleHandle, &cursorInfo);
 }
 
-void displayGrid(int Row, int Col, int enemyRow, int enemyCol) {
+void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
     for (int i = 0; i < ROWS; i++) {
         for (int j = 0; j < COLS; j++) {
             if (i == Row && j == Col)
                 cout << 'P';  // Player
-            else if (i == enemyRow && j == enemyCol && enemyAlive)
-                cout << 'E';  // Enemy
-            else if (isObstacle(i, j))
-                cout << '*';  // Fixed or destructible obstacle
-            else if (destructibleObstacles[i][j])
-                cout << "D"; // Destructible obstacle
-            else if (i == 0)
-                cout << '_';
-            else if (i == ROWS - 1)
-                cout << '-';
-            else if (j == 0 || j == COLS - 1)
-                cout << '|';
-            else if (bombPlanted && i == bombRow && j == bombCol)
-                cout << "B"; // Display Bomb
-            else
-                cout << ' ';
+            else {
+                bool enemyDisplayed = false;
+                for (int k = 0; k < currentMaxEnemies; k++) {
+                    if (i == enemyRow[k] && j == enemyCol[k] && enemyAlive[k]) {
+                        cout << 'E';  // Enemy
+                        enemyDisplayed = true;
+                        break;
+                    }
+                }
+                if (!enemyDisplayed) {
+                    if (isObstacle(i, j))
+                        cout << '*';  // Fixed or destructible obstacle
+                    else if (destructibleObstacles[i][j])
+                        cout << "D"; // Destructible obstacle
+                    else if (i == 0)
+                        cout << '_';  // Top boundary
+                    else if (i == ROWS - 1)
+                        cout << '-';  // Bottom boundary
+                    else if (j == 0 || j == COLS - 1)
+                        cout << '|';  // Left and right boundaries
+                    else if (bombPlanted && i == bombRow && j == bombCol)
+                        cout << "B"; // Display Bomb
+                    else
+                        cout << ' ';
+                }
+            }
         }
         cout << endl;
     }
 }
 
 bool isObstacle(int row, int col) {
-    if (row == 0 || col == 0) {
-        return false; // Ensure no obstacles on the first row
-    }
-    if (row % 2 == 0 && col % 2 == 0 && ((row / 2 + col / 2) % 2 == 0)) {
-        return true; // Fixed obstacles
-    }
-    return false;  // No obstacle
+    if (row == 0 || col == 0) return false;  // No obstacles in the first row/column
+    return row % 2 == 0 && col % 2 == 0;
 }
 
-void spawnEnemy(int& enemyRow, int& enemyCol) {
-    do {
-        enemyRow = rand() % (ROWS - 2) + 1;
-        enemyCol = rand() % (COLS - 2) + 1;
-    } while (isObstacle(enemyRow, enemyCol) || destructibleObstacles[enemyRow][enemyCol]);  // Ensure no overlap
-}
-
-void moveEnemy(int& enemyRow, int& enemyCol, int playerRow, int playerCol) {
-    if (!enemyAlive) return;  // If the enemy is dead, skip moving
-
-    static int moveCounter = 0; // Static counter to track moves
-    const int moveThreshold = 5; // Adjust this value to slow down movement (higher = slower)
-
-    moveCounter++;
-    if (moveCounter < moveThreshold) {
-        return; // Skip moving the enemy until the counter reaches the threshold
-    }
-
-    moveCounter = 0; // Reset counter after moving
-
-    int moveChoice = rand() % 10;
-    int newRow = enemyRow;
-    int newCol = enemyCol;
-
-    if (moveChoice < 2) {
-        // Move towards player
-        if (enemyRow < playerRow) {
-            newRow++;
-        }
-        else if (enemyRow > playerRow) {
-            newRow--;
-        }
-
-        if (enemyCol < playerCol) {
-            newCol++;
-        }
-        else if (enemyCol > playerCol) {
-            newCol--;
-        }
-    }
-    else {
-        // Random movement in one of the four directions
-        int direction = rand() % 4; // Randomly select a direction (0 = up, 1 = down, 2 = left, 3 = right)
-
-        switch (direction) {
-        case 0:  // Move up
-            newRow--;
-            break;
-        case 1:  // Move down
-            newRow++;
-            break;
-        case 2:  // Move left
-            newCol--;
-            break;
-        case 3:  // Move right
-            newCol++;
-            break;
-        }
-    }
-
-    // Check if the new position is valid (not out of bounds and not an obstacle)
-    if (newRow >= 1 && newRow < ROWS - 1 && newCol >= 1 && newCol < COLS - 1 &&
-        !isObstacle(newRow, newCol) && !destructibleObstacles[newRow][newCol]) {
-        enemyRow = newRow;
-        enemyCol = newCol;
-    }
-    else {
-        // If blocked, don't update position (enemy stays in the same place)
-        moveEnemy(enemyRow, enemyCol, playerRow, playerCol); // Recurse to try again
+void spawnEnemies() {
+    // Dynamically spawn the enemies based on currentMaxEnemies for the stage
+    for (int k = 0; k < currentMaxEnemies; k++) {
+        do {
+            enemyRows[k] = rand() % (ROWS - 2) + 1;
+            enemyCols[k] = rand() % (COLS - 2) + 1;
+        } while (isObstacle(enemyRows[k], enemyCols[k]) || destructibleObstacles[enemyRows[k]][enemyCols[k]]);
+        enemyAlive[k] = true;
     }
 }
 
+void moveEnemies(int playerRow, int playerCol) {
+    for (int k = 0; k < currentMaxEnemies; k++) {
+        if (!enemyAlive[k]) continue;
 
-bool checkCollision(int playerRow, int playerCol, int enemyRow, int enemyCol) {
-    return playerRow == enemyRow && playerCol == enemyCol;
+        int moveChoice = rand() % 4;
+        int newRow = enemyRows[k];
+        int newCol = enemyCols[k];
+
+        if (moveChoice == 0) newRow--;
+        else if (moveChoice == 1) newRow++;
+        else if (moveChoice == 2) newCol--;
+        else if (moveChoice == 3) newCol++;
+
+        if (newRow >= 1 && newRow < ROWS - 1 && newCol >= 1 && newCol < COLS - 1 &&
+            !isObstacle(newRow, newCol) && !destructibleObstacles[newRow][newCol]) {
+            enemyRows[k] = newRow;
+            enemyCols[k] = newCol;
+        }
+    }
+}
+
+bool checkCollision(int playerRow, int playerCol) {
+    for (int k = 0; k < currentMaxEnemies; k++) {
+        if (enemyAlive[k] && playerRow == enemyRows[k] && playerCol == enemyCols[k]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void generateDestructibleObstacles() {
@@ -234,8 +242,7 @@ void generateDestructibleObstacles() {
         int r = rand() % (ROWS - 2) + 1;
         int c = rand() % (COLS - 2) + 1;
 
-        // Ensure no overlap with fixed obstacles or initial positions
-        if (!isObstacle(r, c) && !destructibleObstacles[r][c] && !(r == 1 && c == 1)) {
+        if (!isObstacle(r, c) && !destructibleObstacles[r][c]) {
             destructibleObstacles[r][c] = true;
             count++;
         }
@@ -246,32 +253,77 @@ void plantBomb(int playerRow, int playerCol) {
     bombPlanted = true;
     bombRow = playerRow;
     bombCol = playerCol;
-    cout << "Bomb planted at (" << bombRow << ", " << bombCol << ")" << endl;
+    PlaySound(TEXT("bomb_plant.wav"), NULL, SND_FILENAME | SND_ASYNC);
 }
 
-void explodeBomb(int bombRow, int bombCol, int& enemyRow, int& enemyCol) {
-    cout << "Boom! The bomb exploded!" << endl;
-
-    // Check the explosion range and affect obstacles
+void explodeBomb(int bombRow, int bombCol, int playerRow, int playerCol) {
+    PlaySound(TEXT("bomb_explode.wav"), NULL, SND_FILENAME | SND_ASYNC);
     for (int i = -EXPLOSION_RANGE; i <= EXPLOSION_RANGE; i++) {
         for (int j = -EXPLOSION_RANGE; j <= EXPLOSION_RANGE; j++) {
-            int r = bombRow + i;
-            int c = bombCol + j;
-
-            // Check if the position is within bounds and destroy destructible obstacles
-            if (r >= 1 && r < ROWS - 1 && c >= 1 && c < COLS - 1) {
-                if (destructibleObstacles[r][c]) {
-                    destructibleObstacles[r][c] = false;  // Destroy destructible obstacles
+            int targetRow = bombRow + i;
+            int targetCol = bombCol + j;
+            if (targetRow >= 1 && targetRow < ROWS - 1 && targetCol >= 1 && targetCol < COLS - 1) {
+                if (targetRow == playerRow && targetCol == playerCol) {
+                    cout << "YOU LOST!" << endl;
+                    saveHighScore(playerScore);
+                    displayHighScores();
+                    Sleep(3000);
+                    exit(0);
                 }
-            }
-
-            // Check if the enemy is within the explosion range
-            if (r == enemyRow && c == enemyCol) {
-                cout << "The enemy was caught in the explosion and has been destroyed!" << endl;
-                enemyAlive = false; // Mark enemy as dead
-                enemyRow = -1;
-                enemyCol = -1;
+                if (destructibleObstacles[targetRow][targetCol]) {
+                    destructibleObstacles[targetRow][targetCol] = false;
+                }
             }
         }
     }
+}
+
+void readHighScores(int scores[], int& count) {
+    ifstream inputFile(SCORES_FILE);
+    while (inputFile >> scores[count]) {
+        count++;
+    }
+    inputFile.close();
+}
+
+void saveHighScore(int score) {
+    int scores[10];
+    int count = 0;
+    readHighScores(scores, count);
+
+    scores[count] = score;
+    count++;
+
+    // Sort scores
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (scores[i] < scores[j]) {
+                swap(scores[i], scores[j]);
+            }
+        }
+    }
+
+    // Save top 10 scores
+    ofstream outputFile(SCORES_FILE);
+    for (int i = 0; i < 10 && i < count; i++) {
+        outputFile << scores[i] << endl;
+    }
+    outputFile.close();
+}
+
+void displayHighScores() {
+    int scores[10];
+    int count = 0;
+    readHighScores(scores, count);
+
+    cout << "High Scores: " << endl;
+    for (int i = 0; i < count; i++) {
+        cout << scores[i] << endl;
+    }
+}
+
+void transitionToStage(int stage) {
+    cout << "Transitioning to Stage " << stage << "..." << endl;
+    currentMaxEnemies = (stage == 2) ? MAX_ENEMIES_STAGE2 : MAX_ENEMIES_STAGE1;
+    Sleep(2000);  // Simulate transition time
 }

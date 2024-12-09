@@ -9,11 +9,11 @@
 using namespace std;
 
 const int ROWS = 14;
-const int COLS = 30;
-const int MAX_DESTRUCT_OBSTACLES = 50;
+const int COLS = 28;
+const int MAX_DESTRUCT_OBSTACLES = 40;
 const int BOMB_TIMER = 14;
 const int EXPLOSION_RANGE = 2;
-const string SCORES_FILE = "high_scores.txt";
+const string SCORES_FILE = ".high_scores.txt";
 
 const int MAX_ENEMIES_STAGE1 = 2;
 const int MAX_ENEMIES_STAGE2 = 5;  // Max enemies for stage 2 can be 5
@@ -172,7 +172,7 @@ void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
                     if (isObstacle(i, j))
                         cout << '*';  // Fixed or destructible obstacle
                     else if (destructibleObstacles[i][j])
-                        cout << "D"; // Destructible obstacle
+                        cout << 'D'; // Destructible obstacle
                     else if (i == 0)
                         cout << '_';  // Top boundary
                     else if (i == ROWS - 1)
@@ -180,7 +180,7 @@ void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
                     else if (j == 0 || j == COLS - 1)
                         cout << '|';  // Left and right boundaries
                     else if (bombPlanted && i == bombRow && j == bombCol)
-                        cout << "B"; // Display Bomb
+                        cout << 'B'; // Display Bomb
                     else
                         cout << ' ';
                 }
@@ -188,7 +188,13 @@ void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
         }
         cout << endl;
     }
+
+    // Display the score below the grid
+    for (int j = 0; j < COLS; j++) cout << '-';  // Separator line
+    cout << endl;
+    cout << "Score: " << playerScore << endl;
 }
+
 
 bool isObstacle(int row, int col) {
     if (row == 0 || col == 0) return false;  // No obstacles in the first row/column
@@ -262,7 +268,9 @@ void explodeBomb(int bombRow, int bombCol, int playerRow, int playerCol) {
         for (int j = -EXPLOSION_RANGE; j <= EXPLOSION_RANGE; j++) {
             int targetRow = bombRow + i;
             int targetCol = bombCol + j;
+
             if (targetRow >= 1 && targetRow < ROWS - 1 && targetCol >= 1 && targetCol < COLS - 1) {
+                // Check if the player is in the explosion range
                 if (targetRow == playerRow && targetCol == playerCol) {
                     cout << "YOU LOST!" << endl;
                     saveHighScore(playerScore);
@@ -270,13 +278,25 @@ void explodeBomb(int bombRow, int bombCol, int playerRow, int playerCol) {
                     Sleep(3000);
                     exit(0);
                 }
+
+                // Check if there is a destructible obstacle
                 if (destructibleObstacles[targetRow][targetCol]) {
                     destructibleObstacles[targetRow][targetCol] = false;
+                    playerScore += 10;  // Add 10 points for destroying the obstacle
+                }
+
+                // Check if there is an enemy
+                for (int k = 0; k < currentMaxEnemies; k++) {
+                    if (enemyAlive[k] && targetRow == enemyRows[k] && targetCol == enemyCols[k]) {
+                        enemyAlive[k] = false;  // Enemy is eliminated
+                        playerScore += 50;     // Add 50 points for eliminating the enemy
+                    }
                 }
             }
         }
     }
 }
+
 
 void readHighScores(int scores[], int& count) {
     ifstream inputFile(SCORES_FILE);
@@ -303,9 +323,9 @@ void saveHighScore(int score) {
         }
     }
 
-    // Save top 10 scores
+    // Save top 3 scores
     ofstream outputFile(SCORES_FILE);
-    for (int i = 0; i < 10 && i < count; i++) {
+    for (int i = 0; i < 3 && i < count; i++) {
         outputFile << scores[i] << endl;
     }
     outputFile.close();

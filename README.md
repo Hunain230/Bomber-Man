@@ -84,16 +84,7 @@ This is a single-player Bomberman-style game implemented in C++ with the followi
 
 ---
 
-## 👩‍💻 **Contributing**
 
-We welcome contributions to enhance this game! Here's how you can help:
-1. Fork the repository.
-2. Create a new branch: `git checkout -b feature/your-feature`.
-3. Commit your changes: `git commit -m "Add your feature"`.
-4. Push to the branch: `git push origin feature/your-feature`.
-5. Create a Pull Request.
-
----
 
 ## 📧 **Contact**
 

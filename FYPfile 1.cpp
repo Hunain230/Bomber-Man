@@ -8,12 +8,14 @@
 #pragma comment(lib, "winmm.lib")
 using namespace std;
 
-const int ROWS = 14;
-const int COLS = 28;
+const int ROWS = 16;
+const int COLS = 32;
 const int MAX_DESTRUCT_OBSTACLES = 40;
 const int BOMB_TIMER = 14;
 const int EXPLOSION_RANGE = 2;
-const string SCORES_FILE = ".high_scores.txt";
+int powerUpDuration = 0;
+int bombRadius = EXPLOSION_RANGE; // Initial radius from the constant
+const string SCORES_FILE = "Text.txt";
 
 const int MAX_ENEMIES_STAGE1 = 2;
 const int MAX_ENEMIES_STAGE2 = 5;  // Max enemies for stage 2 can be 5
@@ -29,7 +31,10 @@ int bombRow = -1, bombCol = -1;
 int bombTimer = 0;
 int playerScore = 0;
 
+bool powerUpPresent[ROWS][COLS] = { false };  // Power-up presence on the grid
+
 void hideCursor();
+int displayMenu();
 void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]);
 bool isObstacle(int row, int col);
 void spawnEnemies();
@@ -42,128 +47,154 @@ void readHighScores(int scores[], int& count);
 void saveHighScore(int score);
 void displayHighScores();
 void transitionToStage(int stage);
+void generatePowerUps();
+void collectPowerUp(int playerRow, int playerCol);
 
 int main() {
     char ch;
+    int menuChoice = displayMenu();
 
-    cout << "Do you want to start the game?" << endl;
-    cout << "(y / n): ";
-    cin >> ch;
+    if (menuChoice == 3) {
+        cout << "Exiting the game. Goodbye!\n";
+        return 0;  // Exit the program
+    }
 
-    if (ch == 'y' || ch == 'Y') {
-        int Row = 1, Col = 1;
+    // Start the game
+    cout << "Starting the game...\n";
 
-        transitionToStage(1);
-        spawnEnemies();
-        generateDestructibleObstacles();
-        hideCursor();
+    int Row = 1, Col = 1;
 
-        srand(time(0));
+    transitionToStage(1);
+    spawnEnemies();
+    generateDestructibleObstacles();
+    generatePowerUps();  // Generate power-ups
+    hideCursor();
 
-        while (true) {
-            cout << "\033[H";  // Refresh the grid
-            displayGrid(Row, Col, enemyRows, enemyCols);
+    srand(time(0));
 
-            // Player movement and bomb planting
-            if (_kbhit()) {
-                char key = _getch();
-                int newRow = Row, newCol = Col;
+    while (true) {
+        cout << "\033[H";  // Refresh the grid
+        displayGrid(Row, Col, enemyRows, enemyCols);
 
-                if (key == -32) {
-                    key = _getch();
-                    switch (key) {
-                    case 72: newRow--; break;  // Up
-                    case 80: newRow++; break;  // Down
-                    case 75: newCol--; break;  // Left
-                    case 77: newCol++; break;  // Right
-                    }
-                }
+        // Player movement and bomb planting
+        if (_kbhit()) {
+            char key = _getch();
+            int newRow = Row, newCol = Col;
 
-                if (newRow >= 1 && newRow < ROWS - 1 && newCol >= 1 && newCol < COLS - 1 &&
-                    !isObstacle(newRow, newCol) && !destructibleObstacles[newRow][newCol]) {
-                    Row = newRow;
-                    Col = newCol;
-                    playerScore++;
-                }
-
-                if (key == ' ' && !bombPlanted) {
-                    plantBomb(Row, Col);
+            if (key == -32) {
+                key = _getch();
+                switch (key) {
+                case 72: newRow--; break;  // Up
+                case 80: newRow++; break;  // Down
+                case 75: newCol--; break;  // Left
+                case 77: newCol++; break;  // Right
                 }
             }
 
-            // Move enemies
-            moveEnemies(Row, Col);
+            if (newRow >= 1 && newRow < ROWS - 1 && newCol >= 1 && newCol < COLS - 1 &&
+                !isObstacle(newRow, newCol) && !destructibleObstacles[newRow][newCol]) {
+                Row = newRow;
+                Col = newCol;
+            }
 
-            // Check for collision with enemies
-            if (checkCollision(Row, Col)) {
-                cout << "YOU LOST!" << endl;
+            if (key == ' ' && !bombPlanted) {
+                plantBomb(Row, Col);
+            }
+        }
+
+        // Collect Power-up
+        collectPowerUp(Row, Col);
+
+        // Move enemies
+        moveEnemies(Row, Col);
+
+        // Check for collision with enemies
+        if (checkCollision(Row, Col)) {
+            cout << "YOU LOST!" << endl;
+            saveHighScore(playerScore);
+            displayHighScores();
+            Sleep(3000);
+            break;
+        }
+
+        // Bomb explosion logic
+        if (bombPlanted) {
+            bombTimer++;
+            if (bombTimer >= BOMB_TIMER) {
+                explodeBomb(bombRow, bombCol, Row, Col);
+                bombPlanted = false;
+                bombTimer = 0;
+            }
+        }
+
+        // Check if all enemies are defeated to move to the next stage
+        bool allEnemiesDefeated = true;
+        for (int k = 0; k < currentMaxEnemies; k++) {
+            if (enemyAlive[k]) {
+                allEnemiesDefeated = false;
+                break;
+            }
+        }
+
+        if (allEnemiesDefeated) {
+            if (currentMaxEnemies == MAX_ENEMIES_STAGE1) {
+                cout << "Stage 1 Complete! Moving to Stage 2!" << endl;
+                transitionToStage(2);
+                Row = 1; Col = 1;
+                spawnEnemies();
+                generateDestructibleObstacles();
+                generatePowerUps();  // Generate power-ups for the next stage
+            }
+            else {
+                cout << "Congratulations! You completed the game!" << endl;
                 saveHighScore(playerScore);
                 displayHighScores();
                 Sleep(3000);
                 break;
             }
-
-            // Bomb explosion logic
-            if (bombPlanted) {
-                bombTimer++;
-                if (bombTimer >= BOMB_TIMER) {
-                    explodeBomb(bombRow, bombCol, Row, Col);
-                    bombPlanted = false;
-                    bombTimer = 0;
-                }
-            }
-
-            // Check if all enemies are defeated to move to the next stage
-            bool allEnemiesDefeated = true;
-            for (int k = 0; k < currentMaxEnemies; k++) {
-                if (enemyAlive[k]) {
-                    allEnemiesDefeated = false;
-                    break;
-                }
-            }
-
-            if (allEnemiesDefeated) {
-                if (currentMaxEnemies == MAX_ENEMIES_STAGE1) {
-                    cout << "Stage 1 Complete! Moving to Stage 2!" << endl;
-                    transitionToStage(2);
-                    Row = 1; Col = 1;
-                    spawnEnemies();
-                    generateDestructibleObstacles();
-                }
-                else {
-                    cout << "Congratulations! You completed the game!" << endl;
-                    saveHighScore(playerScore);
-                    displayHighScores();
-                    Sleep(3000);
-                    break;
-                }
-            }
-
-            Sleep(100);  // Game speed control
         }
+
+        Sleep(100);  // Game speed control
     }
 
     return 0;
 }
 
-void hideCursor() {
-    HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    CONSOLE_CURSOR_INFO cursorInfo;
-    GetConsoleCursorInfo(consoleHandle, &cursorInfo);
-    cursorInfo.bVisible = false;
-    SetConsoleCursorInfo(consoleHandle, &cursorInfo);
+void generatePowerUps() {
+    // Generate a few power-ups randomly on the grid
+    int count = 0;
+    while (count < 3) {  // Limit the number of power-ups
+        int r = rand() % (ROWS - 2) + 1;
+        int c = rand() % (COLS - 2) + 1;
+
+        if (!isObstacle(r, c) && !destructibleObstacles[r][c] && !powerUpPresent[r][c]) {
+            powerUpPresent[r][c] = true;  // Mark this cell as a power-up
+            count++;
+        }
+    }
 }
 
+void collectPowerUp(int playerRow, int playerCol) {
+    if (powerUpPresent[playerRow][playerCol]) {
+        powerUpPresent[playerRow][playerCol] = false;  // Remove the power-up from the grid
+        bombRadius = 3;  // Increase explosion range when power-up is collected
+        powerUpDuration = 2;  // Power-up lasts for the next two bombs
+        cout << "Power-up collected! Bomb radius increased!" << endl;
+    }
+}
 void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
     for (int i = 0; i < ROWS; i++) {
         for (int j = 0; j < COLS; j++) {
-            if (i == Row && j == Col)
-                cout << 'P';  // Player
+            if (i == Row && j == Col) {
+                // Highlight player in green
+                cout << "\033[32mP\033[0m";
+            }
             else {
                 bool enemyDisplayed = false;
                 for (int k = 0; k < currentMaxEnemies; k++) {
                     if (i == enemyRow[k] && j == enemyCol[k] && enemyAlive[k]) {
-                        cout << 'E';  // Enemy
+                        // Highlight enemy in red
+                        cout << "\033[31mE\033[0m";
                         enemyDisplayed = true;
                         break;
                     }
@@ -180,7 +211,9 @@ void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
                     else if (j == 0 || j == COLS - 1)
                         cout << '|';  // Left and right boundaries
                     else if (bombPlanted && i == bombRow && j == bombCol)
-                        cout << 'B'; // Display Bomb
+                        cout << "\033[33mB\033[0m"; // bomb
+                    else if (powerUpPresent[i][j])  // Display power-up
+                        cout << "\033[34m+\033[0m";  // Power-up in blue
                     else
                         cout << ' ';
                 }
@@ -190,9 +223,49 @@ void displayGrid(int Row, int Col, int enemyRow[], int enemyCol[]) {
     }
 
     // Display the score below the grid
-    for (int j = 0; j < COLS; j++) cout << '-';  // Separator line
-    cout << endl;
-    cout << "Score: " << playerScore << endl;
+    for (int i = 0; i < COLS; i++) cout << "=";
+    cout << endl << "Score: " << playerScore << endl;
+}
+void hideCursor() {
+    HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(consoleHandle, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(consoleHandle, &cursorInfo);
+}
+
+int displayMenu() {
+    int choice;
+    do {
+        system("cls"); // Clear screen before showing the menu
+        cout << "=====================\n";
+        cout << "  BOMBERMAN MENU\n";
+        cout << "=====================\n";
+        cout << "1. Start Game\n";
+        cout << "2. View Instructions\n";
+        cout << "3. Exit\n";
+        cout << "=====================\n";
+        cout << "Enter your choice (1-3): ";
+        cin >> choice;
+
+        if (choice == 2) {
+            system("cls"); // Clear screen before showing instructions
+            cout << "\n========== INSTRUCTIONS ==========\n";
+            cout << "1. Use arrow keys to move the player (P).\n";
+            cout << "2. Plant bombs (B) to eliminate enemies (E).\n";
+            cout << "3. Avoid contact with enemies and obstacles.\n";
+            cout << "4. Reach the goal to win!\n";
+            cout << "===================================\n\n";
+            system("pause"); // Wait for the user to read instructions
+        }
+        else if (choice < 1 || choice > 3) {
+            system("cls"); // Clear screen for invalid input
+            cout << "Invalid choice! Please select 1, 2, or 3.\n";
+        }
+    } while (choice != 1 && choice != 3);
+
+    system("cls"); // Clear screen before starting the game
+    return choice;
 }
 
 
@@ -260,12 +333,30 @@ void plantBomb(int playerRow, int playerCol) {
     bombRow = playerRow;
     bombCol = playerCol;
     PlaySound(TEXT("bomb_plant.wav"), NULL, SND_FILENAME | SND_ASYNC);
+
+    if (powerUpDuration > 0) {
+        // Apply increased bomb radius while the power-up is active
+        cout << "Bomb planted! Bomb radius increased to " << bombRadius << ". "<<
+          endl << powerUpDuration << " bomb(s) left with increased radius." << endl;
+        powerUpDuration--;  // Decrease the power-up duration after each bomb
+    }
+    else {
+        // Default bomb radius after the power-up duration ends
+        bombRadius = EXPLOSION_RANGE;
+        cout << endl;
+        cout << "Bomb planted! Bomb radius: " << bombRadius << "." << endl;
+    }
+
+    // If the power-up duration ends, reset bomb radius to the default value
+    if (powerUpDuration == 0) {
+        bombRadius = EXPLOSION_RANGE;  // Reset bomb radius to the default value
+    }
 }
 
 void explodeBomb(int bombRow, int bombCol, int playerRow, int playerCol) {
     PlaySound(TEXT("bomb_explode.wav"), NULL, SND_FILENAME | SND_ASYNC);
-    for (int i = -EXPLOSION_RANGE; i <= EXPLOSION_RANGE; i++) {
-        for (int j = -EXPLOSION_RANGE; j <= EXPLOSION_RANGE; j++) {
+    for (int i = -bombRadius; i <= bombRadius; i++) {
+        for (int j = -bombRadius; j <= bombRadius; j++) {
             int targetRow = bombRow + i;
             int targetCol = bombCol + j;
 
@@ -296,6 +387,7 @@ void explodeBomb(int bombRow, int bombCol, int playerRow, int playerCol) {
         }
     }
 }
+
 
 
 void readHighScores(int scores[], int& count) {
@@ -343,6 +435,7 @@ void displayHighScores() {
 }
 
 void transitionToStage(int stage) {
+    system("cls"); // Clear the screen
     cout << "Transitioning to Stage " << stage << "..." << endl;
     currentMaxEnemies = (stage == 2) ? MAX_ENEMIES_STAGE2 : MAX_ENEMIES_STAGE1;
     Sleep(2000);  // Simulate transition time

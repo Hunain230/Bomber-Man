@@ -89,7 +89,7 @@ This is a single-player Bomberman-style game implemented in C++ with the followi
 ## 📧 **Contact**
 
 For questions, feedback, or contributions, feel free to contact:  
-**Email:** shunian230@gmail.com 
+**Email:** shunain230@gmail.com 
 
 ---
 
